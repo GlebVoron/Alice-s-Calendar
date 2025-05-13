@@ -35,7 +35,7 @@ def init_db():
 init_db()
 
 
-@app.route('/alice', methods=['POST'])
+@app.route('/', methods=['POST'])
 def handle_alice():
     data = request.json
     request_type = data.get('request', {}).get('type')
