@@ -37,61 +37,83 @@ init_db()
 
 @app.route('/post', methods=['POST'])
 def main():
-    logging.info(f'Request: {request.json!r}')
+    try:
+        # Логируем входящий запрос
+        logging.info(f'Incoming request: {request.json}')
 
-    response = {
-        'session': request.json['session'],
-        'version': request.json['version'],
-        'response': {
-            'end_session': False
+        # Проверяем, что запрос содержит JSON
+        if not request.json:
+            logging.error('Empty request received')
+            return jsonify({
+                "response": {
+                    "text": "Произошла ошибка. Пустой запрос.",
+                    "end_session": False
+                },
+                "version": "1.0"
+            }), 400
+
+        # Создаем базовую структуру ответа
+        response = {
+            "version": request.json.get("version", "1.0"),
+            "session": request.json["session"],
+            "response": {
+                "end_session": False
+            }
         }
-    }
 
-    handle_dialog(request.json, response)
+        # Обрабатываем запрос
+        handle_dialog(request.json, response)
 
-    logging.info(f'Response: {response!r}')
-    return jsonify(response)
+        # Логируем исходящий ответ
+        logging.info(f'Outgoing response: {response}')
+
+        return jsonify(response)
+
+    except Exception as e:
+        logging.error(f'Error processing request: {str(e)}')
+        return jsonify({
+            "response": {
+                "text": "Произошла внутренняя ошибка.",
+                "end_session": False
+            },
+            "version": "1.0"
+        }), 500
 
 
 def handle_dialog(req, res):
     user_id = req['session']['user_id']
-    command = req['request']['original_utterance'].lower()
 
     if req['session']['new']:
-        welcome_text = (
+        # Приветствие для нового пользователя
+        res['response']['text'] = (
             "Привет! Я помогу вам управлять событиями и напоминаниями. "
-            "Вы можете: добавить событие, удалить событие, посмотреть список событий "
-            "или установить напоминание."
+            "Вы можете сказать: 'добавить событие', 'список событий' или 'помощь'."
         )
-        res['response']['text'] = welcome_text
-        res['response']['buttons'] = get_main_suggests()
-        return
-
-    if 'добавь событие' in command:
-        response_text = add_event(user_id, command)
-    elif 'удали событие' in command:
-        response_text = delete_event(user_id, command)
-    elif 'список событий' in command or 'мои события' in command:
-        response_text = list_events(user_id)
-    elif 'напомни' in command:
-        response_text = add_reminder(user_id, command)
-    elif 'помощь' in command or 'что ты умеешь' in command:
-        response_text = (
-            "Я могу: добавить событие, удалить событие, показать список событий "
-            "и установить напоминание. Примеры команд:\n"
-            "- Добавь событие встреча с друзьями 25 декабря в 18:00\n"
-            "- Удали событие встреча с друзьями\n"
-            "- Список событий\n"
-            "- Напомни за 30 минут до встреча с друзьями"
-        )
+        res['response']['buttons'] = [
+            {"title": "Добавить событие", "hide": True},
+            {"title": "Список событий", "hide": True},
+            {"title": "Помощь", "hide": True}
+        ]
     else:
-        response_text = (
-            "Я не поняла команду. Вы можете добавить, удалить или посмотреть список событий. "
-            "Скажите 'помощь' для списка команд."
-        )
+        # Обработка команд
+        command = req['request']['original_utterance'].lower()
 
-    res['response']['text'] = response_text
-    res['response']['buttons'] = get_main_suggests()
+        if 'помощь' in command:
+            res['response']['text'] = (
+                "Я умею:\n"
+                "- Добавлять события: 'Добавь событие встреча 25 декабря в 18:00'\n"
+                "- Показывать список событий: 'Список событий'\n"
+                "- Удалять события: 'Удали событие встреча'\n"
+                "- Добавлять напоминания: 'Напомни за 30 минут до встреча'"
+            )
+        elif 'привет' in command:
+            res['response']['text'] = "Снова здравствуйте! Чем могу помочь?"
+        else:
+            res['response']['text'] = "Я не поняла вашу команду. Скажите 'помощь' для списка доступных команд."
+
+        res['response']['buttons'] = [
+            {"title": "Помощь", "hide": True},
+            {"title": "Список событий", "hide": True}]
 
 
 def get_main_suggests():
