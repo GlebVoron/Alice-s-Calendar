@@ -24,7 +24,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS reminders
                  (id TEXT PRIMARY KEY,
                   event_id TEXT,
-                  remind_before INTEGER,  # в минутах
+                  remind_before INTEGER,
                   is_active INTEGER,
                   FOREIGN KEY(event_id) REFERENCES events(id))''')
 
