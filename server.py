@@ -2,8 +2,10 @@ from flask import Flask, request, jsonify
 import sqlite3
 from datetime import datetime
 import uuid
+import logging
 
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 # Инициализация БД
@@ -11,7 +13,6 @@ def init_db():
     conn = sqlite3.connect('alice_events.db')
     c = conn.cursor()
 
-    # Таблица событий
     c.execute('''CREATE TABLE IF NOT EXISTS events
                  (id TEXT PRIMARY KEY,
                   user_id TEXT,
@@ -20,7 +21,6 @@ def init_db():
                   time TEXT,
                   created_at TEXT)''')
 
-    # Таблица напоминаний
     c.execute('''CREATE TABLE IF NOT EXISTS reminders
                  (id TEXT PRIMARY KEY,
                   event_id TEXT,
@@ -35,49 +35,86 @@ def init_db():
 init_db()
 
 
-@app.route('/', methods=['POST'])
-def handle_alice():
-    data = request.json
-    request_type = data.get('request', {}).get('type')
-    user_id = data.get('session', {}).get('user_id')
+@app.route('/post', methods=['POST'])
+def main():
+    logging.info(f'Request: {request.json!r}')
 
-    if request_type == 'SimpleUtterance':
-        command = data.get('request', {}).get('command', '').lower()
-        response = process_command(user_id, command)
-    else:
-        response = {
-            'text': 'Я могу помочь вам управлять событиями и напоминаниями. Что вы хотите сделать?',
+    response = {
+        'session': request.json['session'],
+        'version': request.json['version'],
+        'response': {
             'end_session': False
         }
+    }
 
-    return jsonify({
-        'version': data.get('version'),
-        'session': data.get('session'),
-        'response': response
-    })
+    handle_dialog(request.json, response)
+
+    logging.info(f'Response: {response!r}')
+    return jsonify(response)
 
 
-def process_command(user_id, command):
+def handle_dialog(req, res):
+    user_id = req['session']['user_id']
+    command = req['request']['original_utterance'].lower()
+
+    if req['session']['new']:
+        welcome_text = (
+            "Привет! Я помогу вам управлять событиями и напоминаниями. "
+            "Вы можете: добавить событие, удалить событие, посмотреть список событий "
+            "или установить напоминание."
+        )
+        res['response']['text'] = welcome_text
+        res['response']['buttons'] = get_main_suggests()
+        return
+
     if 'добавь событие' in command:
-        return add_event(user_id, command)
+        response_text = add_event(user_id, command)
     elif 'удали событие' in command:
-        return delete_event(user_id, command)
-    elif 'список событий' in command:
-        return list_events(user_id)
+        response_text = delete_event(user_id, command)
+    elif 'список событий' in command or 'мои события' in command:
+        response_text = list_events(user_id)
     elif 'напомни' in command:
-        return add_reminder(user_id, command)
+        response_text = add_reminder(user_id, command)
+    elif 'помощь' in command or 'что ты умеешь' in command:
+        response_text = (
+            "Я могу: добавить событие, удалить событие, показать список событий "
+            "и установить напоминание. Примеры команд:\n"
+            "- Добавь событие встреча с друзьями 25 декабря в 18:00\n"
+            "- Удали событие встреча с друзьями\n"
+            "- Список событий\n"
+            "- Напомни за 30 минут до встреча с друзьями"
+        )
     else:
-        return {
-            'text': 'Я не поняла команду. Вы можете добавить, удалить или посмотреть список событий.',
-            'end_session': False
-        }
+        response_text = (
+            "Я не поняла команду. Вы можете добавить, удалить или посмотреть список событий. "
+            "Скажите 'помощь' для списка команд."
+        )
+
+    res['response']['text'] = response_text
+    res['response']['buttons'] = get_main_suggests()
+
+
+def get_main_suggests():
+    suggests = [
+        {'title': 'Добавь событие', 'hide': True},
+        {'title': 'Удали событие', 'hide': True},
+        {'title': 'Список событий', 'hide': True},
+        {'title': 'Помощь', 'hide': True}
+    ]
+    return suggests
 
 
 def add_event(user_id, command):
     try:
-        # Парсинг команды типа "добавь событие встреча с друзьями 25 декабря в 18:00"
         parts = command.split()
-        event_name = ' '.join(parts[2:-3])
+        if len(parts) < 6:
+            return "Недостаточно данных. Формат: Добавь событие [название] [дата] в [время]"
+
+        # Извлекаем название события (между "добавь событие" и датой)
+        event_name_start = parts.index('событие') + 1
+        event_name_end = -3  # последние 3 части - это дата, "в" и время
+        event_name = ' '.join(parts[event_name_start:event_name_end])
+
         date_str = parts[-3]
         time_str = parts[-1]
 
@@ -91,20 +128,17 @@ def add_event(user_id, command):
         conn.commit()
         conn.close()
 
-        return {
-            'text': f'Событие "{event_name}" на {date_str} в {time_str} добавлено.',
-            'end_session': False
-        }
+        return f'Событие "{event_name}" на {date_str} в {time_str} добавлено.'
     except Exception as e:
-        return {
-            'text': 'Не удалось добавить событие. Пожалуйста, повторите в формате: "Добавь событие название дата время"',
-            'end_session': False
-        }
+        logging.error(f"Error adding event: {e}")
+        return "Не удалось добавить событие. Проверьте формат команды."
 
 
 def delete_event(user_id, command):
     try:
         event_name = command.replace('удали событие', '').strip()
+        if not event_name:
+            return "Укажите название события для удаления."
 
         conn = sqlite3.connect('alice_events.db')
         c = conn.cursor()
@@ -112,72 +146,75 @@ def delete_event(user_id, command):
                   (user_id, event_name))
         deleted_rows = c.rowcount
         conn.commit()
+
+        # Удаляем связанные напоминания
+        if deleted_rows > 0:
+            c.execute("DELETE FROM reminders WHERE event_id IN "
+                      "(SELECT id FROM events WHERE user_id = ? AND name = ?)",
+                      (user_id, event_name))
+            conn.commit()
+
         conn.close()
 
         if deleted_rows > 0:
-            return {
-                'text': f'Событие "{event_name}" удалено.',
-                'end_session': False
-            }
+            return f'Событие "{event_name}" и связанные напоминания удалены.'
         else:
-            return {
-                'text': f'Событие "{event_name}" не найдено.',
-                'end_session': False
-            }
+            return f'Событие "{event_name}" не найдено.'
     except Exception as e:
-        return {
-            'text': 'Не удалось удалить событие.',
-            'end_session': False
-        }
+        logging.error(f"Error deleting event: {e}")
+        return "Не удалось удалить событие."
 
 
 def list_events(user_id):
     try:
         conn = sqlite3.connect('alice_events.db')
         c = conn.cursor()
-        c.execute("SELECT name, date, time FROM events WHERE user_id = ? ORDER BY date, time",
+        c.execute('''SELECT e.name, e.date, e.time, 
+                     GROUP_CONCAT(r.remind_before, ', ') 
+                     FROM events e
+                     LEFT JOIN reminders r ON e.id = r.event_id
+                     WHERE e.user_id = ?
+                     GROUP BY e.id
+                     ORDER BY e.date, e.time''',
                   (user_id,))
         events = c.fetchall()
         conn.close()
 
         if not events:
-            return {
-                'text': 'У вас нет запланированных событий.',
-                'end_session': False
-            }
+            return 'У вас нет запланированных событий.'
 
-        events_text = '\n'.join([f"{name} - {date} в {time}" for name, date, time in events])
-        return {
-            'text': f'Ваши события:\n{events_text}',
-            'end_session': False
-        }
+        events_text = []
+        for name, date, time, reminders in events:
+            event_info = f"{name} - {date} в {time}"
+            if reminders:
+                event_info += f" (напоминания за {reminders} минут)"
+            events_text.append(event_info)
+
+        return 'Ваши события:\n' + '\n'.join(events_text)
     except Exception as e:
-        return {
-            'text': 'Не удалось получить список событий.',
-            'end_session': False
-        }
+        logging.error(f"Error listing events: {e}")
+        return "Не удалось получить список событий."
 
 
 def add_reminder(user_id, command):
     try:
-        # Парсинг команды типа "напомни за 30 минут до встреча с друзьями"
         parts = command.split()
-        minutes = int(parts[1])
+        if len(parts) < 5 or parts[1] != 'за' or parts[3] != 'до':
+            return "Неверный формат. Пример: Напомни за 30 минут до встреча с друзьями"
+
+        minutes = int(parts[2])
         event_name = ' '.join(parts[4:])
 
         conn = sqlite3.connect('alice_events.db')
         c = conn.cursor()
 
-        # Находим событие
         c.execute("SELECT id FROM events WHERE user_id = ? AND name = ?",
                   (user_id, event_name))
         event = c.fetchone()
 
         if not event:
-            return {
-                'text': f'Событие "{event_name}" не найдено.',
-                'end_session': False
-            }
+            conn.close()
+            return f'Событие "{event_name}" не найдено.'
 
         event_id = event[0]
         reminder_id = str(uuid.uuid4())
@@ -187,16 +224,11 @@ def add_reminder(user_id, command):
         conn.commit()
         conn.close()
 
-        return {
-            'text': f'Напоминание за {minutes} минут до "{event_name}" установлено.',
-            'end_session': False
-        }
+        return f'Напоминание за {minutes} минут до "{event_name}" установлено.'
     except Exception as e:
-        return {
-            'text': 'Не удалось установить напоминание. Пожалуйста, повторите в формате: "Напомни за X минут до название события"',
-            'end_session': False
-        }
+        logging.error(f"Error adding reminder: {e}")
+        return "Не удалось установить напоминание. Проверьте формат команды."
 
 
 if __name__ == '__main__':
-    app.run(port=5000)
+    app.run()
