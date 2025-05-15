@@ -8,7 +8,6 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-# Инициализация БД
 def init_db():
     conn = sqlite3.connect('alice_events.db')
     c = conn.cursor()
@@ -88,20 +87,20 @@ def handle_dialog(req, res):
         if 'помощь' in command or 'что ты умеешь' in command:
             res['response']['text'] = (
                 "Я умею:\n"
-                "- Добавлять события: 'Добавь событие встреча 25 декабря в 18:00'\n"
-                "- Показывать список событий: 'Список событий'\n"
-                "- Удалять события: 'Удали событие встреча'\n"
-                "- Добавлять напоминания: 'Напомни за 30 минут до встреча'"
+                "- Добавлять события: Добавь событие 'название события' 'дата' в 'время\n"
+                "- Показывать список событий: Список событий\n"
+                "- Удалять события: Удали событие 'название события'\n"
+                "- Добавлять напоминания: Напомни за 'кол-во минут' минут до 'название события'"
             )
-        elif 'привет' in command:
+        elif 'Привет' in command:
             res['response']['text'] = "Снова здравствуйте! Чем могу помочь?"
-        elif 'добавь событие' in command:
+        elif 'Добавь событие' in command:
             res['response']['text'] = add_event(user_id, command)
-        elif 'удали событие' in command:
+        elif 'Удали событие' in command:
             res['response']['text'] = delete_event(user_id, command)
-        elif 'список событий' in command or 'мои события' in command:
+        elif 'Список событий' in command or 'мои события' in command:
             res['response']['text'] = list_events(user_id)
-        elif 'напомни' in command:
+        elif 'Напомни' in command:
             res['response']['text'] = add_reminder(user_id, command)
         else:
             res['response']['text'] = "Я не поняла команду. Скажите 'помощь' для списка команд."
@@ -111,7 +110,9 @@ def handle_dialog(req, res):
 
 def get_main_suggests():
     return [
-        {"title": "Добавить событие", "hide": True},
+        {"title": "Добавить событие ...", "hide": True},
+        {"title": "Удали событие ...", "hide": True},
+        {"title": "Напомни ...", "hide": True},
         {"title": "Список событий", "hide": True},
         {"title": "Помощь", "hide": True}
     ]
@@ -126,12 +127,12 @@ def add_event(user_id, command):
         # Извлекаем название события
         event_name_parts = []
         i = parts.index('событие') + 1
-        while i < len(parts) - 3:  # последние 3 части - дата, "в" и время
+        while i < len(parts) - 4:  # последние 3 части - дата, "в" и время
             event_name_parts.append(parts[i])
             i += 1
 
         event_name = ' '.join(event_name_parts)
-        date_str = parts[-3]
+        date_str = parts[-4] + " " + parts[-3]
         time_str = parts[-1]
 
         event_id = str(uuid.uuid4())
